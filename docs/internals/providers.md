@@ -78,6 +78,12 @@ run before the prompt. They reject profiles with such configuration before launc
 instructions and tool denial do not create a native sandbox.
 See [helper constraints](../../apps/server/src/textGeneration/AntigravityTextGeneration.ts).
 
+Copilot helpers run with a throwaway `COPILOT_HOME` instead, because ACP has no session delete for
+Copilot and helper sessions would otherwise fill the user's history. That also excludes user-level
+MCP servers and hooks without having to reject those profiles. Only Copilot is text-generation
+capable among Registry agents: isolating a helper depends on each agent's own flags, and the server
+never falls back to it automatically because every request spends the user's plan.
+
 ## Provider updates run only through the owning installer
 
 A package manager runs only when the resolved executable's path proves it owns the install. Homebrew

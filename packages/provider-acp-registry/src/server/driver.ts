@@ -7,10 +7,15 @@ import {
   type ServerProvider,
   type ServerProviderModel,
 } from "@t3tools/contracts";
-import { AcpRegistrySettings } from "../settings.ts";
+import { AcpRegistrySettings, isCopilotAcpRegistrySettings } from "../settings.ts";
+import * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
+import * as EffectAcpErrors from "effect-acp/errors";
 import * as HostProcess from "@t3tools/shared/HostProcess";
-import { createModelCapabilities } from "@t3tools/shared/model";
+import { createModelCapabilities, readCustomModelEntries } from "@t3tools/shared/model";
 import * as Clock from "effect/Clock";
+import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
 import * as Digest from "effect/crypto/Digest";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as DateTime from "effect/DateTime";
@@ -57,6 +62,7 @@ import * as AcpRegistrySupport from "./AcpRegistrySupport.ts";
 import * as AcpRegistryRuntimeCoordinator from "./AcpRegistryRuntimeCoordinator.ts";
 import * as AcpRegistryAuth from "./auth.ts";
 import * as AcpRegistryAuthenticationState from "./authenticationState.ts";
+import { makeCopilotTextGeneration } from "./copilotTextGeneration.ts";
 
 const DRIVER_KIND = ProviderDriverKind.make("acpRegistry");
 const decodeSettings = Schema.decodeSync(AcpRegistrySettings);
@@ -73,7 +79,7 @@ const makeUnsupportedTextGeneration = (): ProviderTextGeneration => {
     Effect.fail(
       new TextGenerationError({
         operation,
-        detail: "ACP Registry instances do not provide application text generation.",
+        detail: "This ACP Registry agent does not provide application text generation.",
       }),
     );
   return {
@@ -207,7 +213,7 @@ function baseSnapshot(
     ...(input.accentColor ? { accentColor: input.accentColor } : {}),
     ...(iconUrl ? { iconUrl } : {}),
     continuation: { groupKey: input.continuationKey },
-    supportsTextGeneration: false,
+    supportsTextGeneration: isCopilotAcpRegistrySettings(input.settings),
     enabled: input.settings.enabled,
     installed: input.installed,
     version: input.version,
@@ -808,6 +814,59 @@ export const AcpRegistryDriver: ProviderDriver<AcpRegistrySettings, AcpRegistryD
         Effect.asVoid,
       ),
     };
+    const makeCopilotTextRuntime = Effect.fn("AcpRegistryDriver.makeCopilotTextRuntime")(
+      function* (input: {
+        readonly cwd: string;
+        readonly args: ReadonlyArray<string>;
+        readonly environment: NodeJS.ProcessEnv;
+      }) {
+        const { spawn } = yield* catalog
+          .resolve(effectiveConfig, input.cwd, processEnvironment)
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new EffectAcpErrors.AcpSpawnError({
+                  command: effectiveConfig.agentId || "copilot",
+                  cause,
+                }),
+            ),
+          );
+        const context = yield* Layer.build(
+          AcpSessionRuntime.layer({
+            spawn: {
+              ...spawn,
+              args: [...spawn.args, ...input.args],
+              env: { ...spawn.env, ...input.environment },
+            },
+            cwd: input.cwd,
+            clientCapabilities: {
+              fs: { readTextFile: false, writeTextFile: false },
+              terminal: false,
+            },
+            clientInfo: { name: "t3-code-text-generation", version: "0.0.0" },
+            authenticateOnAuthRequired: false,
+            ...(effectiveConfig.authMethodId ? { authMethodId: effectiveConfig.authMethodId } : {}),
+            customModels: readCustomModelEntries(effectiveConfig.customModels).map(
+              (entry) => entry.slug,
+            ),
+          }),
+        );
+        return yield* Effect.service(AcpSessionRuntime.AcpSessionRuntime).pipe(
+          Effect.provide(context),
+        );
+      },
+      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+      Effect.provideService(SecureRandom.SecureRandom, random),
+    );
+    const textGeneration = isCopilotAcpRegistrySettings(effectiveConfig)
+      ? yield* makeCopilotTextGeneration({
+          environment: processEnvironment,
+          makeRuntime: makeCopilotTextRuntime,
+        }).pipe(
+          Effect.provideService(FileSystem.FileSystem, yield* FileSystem.FileSystem),
+          Effect.provideService(Path.Path, yield* Path.Path),
+        )
+      : makeUnsupportedTextGeneration();
 
     return {
       instanceId,
@@ -822,7 +881,7 @@ export const AcpRegistryDriver: ProviderDriver<AcpRegistrySettings, AcpRegistryD
         refresh: snapshot.refresh.pipe(Effect.tap(() => controller.refreshMethods ?? Effect.void)),
       },
       orchestrationAdapter,
-      textGeneration: makeUnsupportedTextGeneration(),
+      textGeneration,
       acpSessionManagement: {
         listSessions: ({ cwd, cursor }) =>
           provideAcpManagementServices(

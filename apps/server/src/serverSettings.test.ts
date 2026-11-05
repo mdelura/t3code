@@ -488,6 +488,35 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
     }).pipe(Effect.provide(layerServerSettings())),
   );
 
+  it.effect("keeps a Copilot text generation selection but replaces other ACP agents", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+      const driver = ProviderDriverKind.make("acpRegistry");
+      const copilot = ProviderInstanceId.make("acpRegistry_copilot");
+      const local = ProviderInstanceId.make("acpRegistry_local");
+      const kilo = ProviderInstanceId.make("acpRegistry_kilo");
+      yield* serverSettings.updateSettings({
+        providerInstances: {
+          [copilot]: { driver, config: { agentId: "github-copilot-cli" } },
+          [local]: { driver, config: { source: "local", commandPath: "/usr/bin/copilot" } },
+          [kilo]: { driver, config: { agentId: "kilo" } },
+        },
+      });
+
+      for (const instanceId of [copilot, local]) {
+        const selection = { instanceId, model: "claude-haiku-4.5" };
+        const next = yield* serverSettings.updateSettings({
+          textGenerationModelSelection: selection,
+        });
+        assert.deepEqual(next.textGenerationModelSelection, selection);
+      }
+      const replaced = yield* serverSettings.updateSettings({
+        textGenerationModelSelection: { instanceId: kilo, model: "kilo-model" },
+      });
+      assert.notEqual(replaced.textGenerationModelSelection.instanceId, kilo);
+    }).pipe(Effect.provide(layerServerSettings())),
+  );
+
   it.effect("refuses to save over a settings file it cannot parse", () =>
     Effect.gen(function* () {
       const config = yield* ServerConfig.ServerConfig;

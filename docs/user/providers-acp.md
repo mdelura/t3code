@@ -132,9 +132,16 @@ Checkpoint rollback restores your files as usual. ACP agents cannot rewind their
 so the next turn after a rollback starts a fresh agent session that no longer remembers the
 conversation from before the checkpoint.
 
-Registry instances are not used for T3's app-owned text generation, such as thread titles, commit
-messages, branch names, or pull request descriptions. Configure a text-generation-capable provider
-for those actions.
+## Text generation
+
+GitHub Copilot can write T3's thread titles, commit messages, branch names, and pull request
+descriptions. To use it, choose a Copilot model under **Settings → Threads → Text generation**. T3
+Code never switches to Copilot on its own, because each request counts against your Copilot plan, so
+consider a low-cost model. These requests run with no tools and without your Copilot MCP servers,
+hooks, or custom instructions, and they do not appear in your Copilot session history.
+
+Other Registry agents are not used for text generation. Configure another provider for those
+actions.
 
 ## Advanced configuration
 

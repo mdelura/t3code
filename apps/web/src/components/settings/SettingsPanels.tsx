@@ -1536,6 +1536,14 @@ export function ThreadsSettingsPanel() {
   const textGenInstanceEntry = textGenerationModelInstanceEntries.find(
     (entry) => entry.instanceId === textGenInstanceId,
   );
+  // The picker previews the first usable provider, but the server only falls back automatically
+  // to built-in providers. Until the user picks an ACP agent, its preview would not be in effect.
+  const textGenerationSelectionInEffect = textGenerationModelInstanceEntries.some(
+    (entry) =>
+      entry.instanceId === settings.textGenerationModelSelection?.instanceId &&
+      entry.enabled &&
+      entry.isAvailable,
+  );
   const textGenProvider: ProviderDriverKind =
     textGenInstanceEntry?.driverKind ?? DEFAULT_DRIVER_KIND;
   const textGenerationModelOptionsByInstance = getCustomModelOptionsByInstance(
@@ -1795,7 +1803,11 @@ export function ThreadsSettingsPanel() {
                   instanceEntries={textGenerationModelInstanceEntries}
                   modelOptionsByInstance={textGenerationModelOptionsByInstance}
                   triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
-                  {...(mixedTextGenerationModel ? { triggerLabel: "Mixed" } : {})}
+                  {...(mixedTextGenerationModel
+                    ? { triggerLabel: "Mixed" }
+                    : textGenerationSelectionInEffect
+                      ? {}
+                      : { triggerLabel: "Choose a model" })}
                   getModelDisabledReason={textGenerationModelDisabledReason}
                   {...(environmentId
                     ? {
